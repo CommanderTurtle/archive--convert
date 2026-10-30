@@ -1,10 +1,10 @@
 import type { TargetedMouseEvent } from "preact";
 import { useSignalEffect } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
-import { popupOpen, closePopup } from "src/ui/PopupStore";
+import { popupOpen, closePopup, restorePopupFocus } from "src/ui/PopupStore";
 
 import "./index.css";
-import { PopupData } from "src/ui";
+import { PopupData } from "src/ui/AppState";
 
 export default function Popup() {
   const ref = useRef<HTMLDialogElement>(null);
@@ -14,12 +14,18 @@ export default function Popup() {
     if (popupOpen.value) {
       if (!elem.open) elem.showModal();
     } else {
-      if (elem.open) elem.close();
+      if (elem.open) {
+        elem.close();
+        requestAnimationFrame(restorePopupFocus);
+      }
     }
   });
 
   useEffect(() => {
     const handler = (ev: KeyboardEvent) => {
+      if (!popupOpen.peek()) return;
+      // Other window key handlers (e.g. type-to-search) skip prevented events, so this
+      // keeps Escape from also reaching the page behind the popup.
       if (ev.key === "Escape") ev.preventDefault();
       if (
         ev.key === "Escape" &&

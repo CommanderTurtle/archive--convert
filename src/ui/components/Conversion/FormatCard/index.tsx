@@ -9,6 +9,9 @@ interface FormatCardProps {
   selected: boolean;
   onSelect: (id: string) => void;
   advanced?: boolean;
+  tabIndex?: number;
+  onFocus?: () => void;
+  onKeyDown?: preact.KeyboardEventHandler<HTMLButtonElement>;
 }
 
 export default function FormatCard({
@@ -17,6 +20,9 @@ export default function FormatCard({
   selected,
   onSelect,
   advanced = false,
+  tabIndex,
+  onFocus,
+  onKeyDown,
 }: FormatCardProps) {
   const [format, handler] = conversionOption;
 
@@ -25,6 +31,11 @@ export default function FormatCard({
       className={`format-card ${selected ? "active" : ""}`}
       onClick={() => onSelect(id)}
       title={format.name}
+      role="option"
+      aria-selected={selected}
+      tabIndex={tabIndex}
+      onFocus={onFocus}
+      onKeyDown={onKeyDown}
     >
       <div className="format-card-row">
         <FileIcon

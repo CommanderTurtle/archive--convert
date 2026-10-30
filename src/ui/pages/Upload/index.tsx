@@ -1,8 +1,9 @@
+import useFirstTabTarget from "src/ui/scripts/useFirstTabTarget";
 import { useEffect, useRef } from "preact/hooks";
 import { CurrentPage, LoadingToolsText, Pages } from "src/ui/AppState";
 import { goToUploadHome, SelectedFiles } from "src/main";
 import { Upload } from "lucide-preact";
-import { PopupData } from "src/ui";
+import { PopupData } from "src/ui/AppState";
 import { openPopup } from "src/ui/PopupStore";
 
 import Logo from "src/ui/components/Logo";
@@ -13,6 +14,8 @@ import StyledButton from "src/ui/components/StyledButton";
 import "./index.css";
 
 export default function UploadPage() {
+  const uploadRef = useRef<HTMLDivElement>(null);
+  useFirstTabTarget(uploadRef);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleClick = (ev: MouseEvent) => {
@@ -37,7 +40,7 @@ export default function UploadPage() {
         dismissible: true,
         buttonText: "OK",
       };
-      openPopup();
+      openPopup(() => uploadRef.current);
       return;
     }
 
@@ -79,6 +82,9 @@ export default function UploadPage() {
         </div>
 
         <div
+          ref={uploadRef}
+          aria-label="Select files to convert"
+          aria-disabled={!formatsReady}
           className={`upload-dropzone ${!formatsReady ? "upload-dropzone--pending" : ""}`}
           onClick={handleClick}
           role="button"
@@ -98,7 +104,7 @@ export default function UploadPage() {
             name="uploadFile"
             id="uploadFile"
             onClick={(ev) => ev.stopPropagation()}
-            tabIndex={0}
+            tabIndex={-1}
             disabled={!formatsReady}
             onChange={handleChange}
           />

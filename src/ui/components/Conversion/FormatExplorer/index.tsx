@@ -1,4 +1,7 @@
 import FormatCard from "src/ui/components/Conversion/FormatCard";
+import useFirstTabTarget from "src/ui/scripts/useFirstTabTarget";
+import useTypeToSearch from "src/ui/scripts/useTypeToSearch";
+import { hasModifier, moveFocus } from "src/ui/scripts/keyboard";
 import Chip from "src/ui/components/Chip";
 import { Search, X } from "lucide-preact";
 import {
@@ -20,7 +23,9 @@ import {
 import { useDebouncedCallback } from "use-debounce";
 
 import "./index.css";
-import { useMemo, useRef, useState } from "preact/hooks";
+import { useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import { popupOpen } from "src/ui/PopupStore";
+import type { RefObject } from "preact";
 import type { FileFormat } from "src/FormatHandler";
 import type { ConversionOption, ConversionOptionsMap } from "src/main";
 import { Mode, ModeEnum } from "src/ui/ModeStore";
@@ -36,6 +41,8 @@ import { Category, type CategoryType } from "src/Formats";
 interface FormatExplorerProps {
   conversionOptions: ConversionOptionsMap;
   matchingFrom?: Set<FileFormat>;
+  onAdvance?: (format: ConversionOption) => void;
+  onBack?: () => void;
   onSelect?: (format: ConversionOption | null) => void;
   debounceWaitMs?: number;
   direction?: "from" | "to";
@@ -47,6 +54,8 @@ interface FormatExplorerProps {
   onClickTo?: () => void;
   showAll?: boolean;
   onShowAll?: () => void;
+  /** Other parts of the page where typing should also go to the search input. */
+  searchScopeRef?: RefObject<HTMLElement | null>;
 }
 
 type SearchIndex = Map<string, ConversionOption>;
@@ -166,6 +175,8 @@ export default function FormatExplorer({
   conversionOptions,
   matchingFrom,
   onSelect,
+  onAdvance,
+  onBack,
   debounceWaitMs = 200,
   direction = "to",
   fromOption,
@@ -176,6 +187,7 @@ export default function FormatExplorer({
   onClickTo,
   showAll = false,
   onShowAll,
+  searchScopeRef,
 }: FormatExplorerProps) {
   const isAdvanced = Mode.value === ModeEnum.Advanced;
 
@@ -187,6 +199,14 @@ export default function FormatExplorer({
   const [searchTerm, setSearchTerm] = useState("");
   const [searchInputValue, setSearchInputValue] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
+  useFirstTabTarget(searchInputRef);
+  const previousDirection = useRef(direction);
+
+  const rootRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const [activeCard, setActiveCard] = useState<string | null>(null);
+  const [activeChip, setActiveChip] = useState(0);
+  const [focusGrid, setFocusGrid] = useState(false);
 
   const activeCategories = SelectedCategories.value;
 
@@ -205,6 +225,58 @@ export default function FormatExplorer({
     setSearchTerm(term);
   }, debounceWaitMs);
 
+  const resultKeys = [...searchResultsIndex.keys()];
+  const tabStop =
+    activeCard && searchResultsIndex.has(activeCard)
+      ? activeCard
+      : selectedOptionId && searchResultsIndex.has(selectedOptionId)
+        ? selectedOptionId
+        : resultKeys[0];
+
+  const focusSearch = () => searchInputRef.current?.focus();
+  const clearSearch = () => {
+    handleDebounceSearch.cancel();
+    setSearchInputValue("");
+    setSearchTerm("");
+  };
+
+  useLayoutEffect(() => {
+    if (previousDirection.current === direction) return;
+    previousDirection.current = direction;
+    setActiveCard(null);
+    clearSearch();
+    if (!popupOpen.peek()) focusSearch();
+  }, [direction]);
+
+  // Runs after the flushed search results render, focusing the grid's tab stop.
+  useLayoutEffect(() => {
+    if (!focusGrid) return;
+    setFocusGrid(false);
+    resultsRef.current
+      ?.querySelector<HTMLButtonElement>(".format-card[tabindex='0'], .explorer-dialog-btn")
+      ?.focus();
+  }, [focusGrid]);
+
+  useTypeToSearch({
+    scopeRefs: searchScopeRef ? [rootRef, searchScopeRef] : [rootRef],
+    inputRef: searchInputRef,
+    value: searchInputValue,
+    onType: (value) => {
+      setSearchInputValue(value);
+      handleDebounceSearch(value);
+    },
+    onEscape: () => {
+      if (!searchInputValue) return onBack?.();
+      clearSearch();
+      focusSearch();
+    },
+  });
+
+  const showAllFormats = () => {
+    onShowAll?.();
+    focusSearch();
+  };
+
   const handleOptionSelection = (id: string, option: ConversionOption) => {
     if (id === selectedOptionId) {
       onSelect?.(null);
@@ -215,15 +287,15 @@ export default function FormatExplorer({
 
   const handleClearFilters = () => {
     clearCategories();
-    setSearchTerm("");
-    setSearchInputValue("");
+    clearSearch();
+    focusSearch();
   };
 
   const noResults = searchResultsIndex.size === 0;
   const filtersActive = hasActiveFilters() || searchTerm !== "";
 
   return (
-    <div className="format-explorer">
+    <div className="format-explorer" ref={rootRef}>
       <div className="format-browser">
         <div className="search-container">
           <FromTo
@@ -246,6 +318,16 @@ export default function FormatExplorer({
             <input
               ref={searchInputRef}
               type="text"
+              aria-label={`Search ${direction === "from" ? "input" : "output"} formats`}
+              onKeyDown={(event) => {
+                if (hasModifier(event)) return;
+                if (event.key === "Enter" || event.key === "ArrowDown") {
+                  event.preventDefault();
+                  handleDebounceSearch.cancel();
+                  setSearchTerm(searchInputValue);
+                  setFocusGrid(true);
+                }
+              }}
               placeholder="Search formats..."
               value={searchInputValue}
               onInput={(ev) => {
@@ -257,9 +339,10 @@ export default function FormatExplorer({
             {searchInputValue && (
               <button
                 className="search-clear"
+                aria-label="Clear search"
                 onClick={() => {
-                  setSearchInputValue("");
-                  setSearchTerm("");
+                  clearSearch();
+                  focusSearch();
                 }}
               >
                 <X size={14} />
@@ -267,10 +350,19 @@ export default function FormatExplorer({
             )}
           </div>
 
-          <div className="chip-filters">
-            {Object.entries(CATEGORY_CHIPS).map(([id, { label, icon }]) => (
+          <div
+            className="chip-filters"
+            role="group"
+            aria-label="Filter by category"
+            onKeyDown={(event) =>
+              moveFocus(event, [...event.currentTarget.querySelectorAll("button")], { wrap: true })
+            }
+          >
+            {Object.entries(CATEGORY_CHIPS).map(([id, { label, icon }], index) => (
               <Chip
                 key={id}
+                tabIndex={activeChip === index ? 0 : -1}
+                onFocus={() => setActiveChip(index)}
                 label={label}
                 icon={icon}
                 selected={activeCategories.has(id as CategoryType)}
@@ -280,7 +372,26 @@ export default function FormatExplorer({
           </div>
         </div>
 
-        <div className="format-list-container scroller">
+        <div
+          className="format-list-container scroller"
+          ref={resultsRef}
+          onKeyDown={(event) => {
+            const buttons = [
+              ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                ".format-card, .explorer-dialog-btn",
+              ),
+            ];
+            const cards = buttons.filter((button) => button.classList.contains("format-card"));
+            const onCard = cards.includes(event.target as HTMLButtonElement);
+            // Count cards on the first rendered row, so this works for any layout.
+            const columns = onCard
+              ? Math.max(1, cards.filter((card) => card.offsetTop === cards[0].offsetTop).length)
+              : 1;
+            // Home/End stay within the cards; arrows can continue on to the buttons below.
+            const items = onCard && (event.key === "Home" || event.key === "End") ? cards : buttons;
+            moveFocus(event, items, { columns });
+          }}
+        >
           <div className="list-header">
             <span>
               {searchResultsIndex.size} format{searchResultsIndex.size !== 1 ? "s" : ""}
@@ -296,16 +407,23 @@ export default function FormatExplorer({
                 </button>
               )}
               {direction === "from" && !showAll && (
-                <button className="explorer-dialog-btn" onClick={() => onShowAll?.()}>
+                <button className="explorer-dialog-btn" onClick={showAllFormats}>
                   Show all
                 </button>
               )}
             </div>
           ) : (
-            <div className="format-grid">
+            <div className="format-grid" role="listbox" aria-label="Formats">
               {Array.from(searchResultsIndex).map(([key, option]) => (
                 <FormatCard
                   selected={key === selectedOptionId}
+                  tabIndex={key === tabStop ? 0 : -1}
+                  onFocus={() => setActiveCard(key)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" || hasModifier(event)) return;
+                    event.preventDefault();
+                    if (!event.repeat) onAdvance?.(option);
+                  }}
                   onSelect={(key) => handleOptionSelection(key, option)}
                   conversionOption={option}
                   id={key}
@@ -318,7 +436,7 @@ export default function FormatExplorer({
           {!noResults && direction === "from" && !showAll && (
             <div className="explorer-dialog">
               <p>Didn't find what you were looking for?</p>
-              <button className="explorer-dialog-btn" onClick={() => onShowAll?.()}>
+              <button className="explorer-dialog-btn" onClick={showAllFormats}>
                 Show all
               </button>
             </div>

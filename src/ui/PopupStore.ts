@@ -27,9 +27,24 @@ export interface PopupDataContainer {
 
 export const popupOpen = signal(false);
 
-export const openPopup = () => (popupOpen.value = true);
+type FocusTarget = () => HTMLElement | null;
+let returnFocus: FocusTarget | undefined;
+
+export const openPopup = (target?: FocusTarget) => {
+  if (!popupOpen.value) {
+    const opener = document.activeElement;
+    returnFocus = target ?? (() => (opener instanceof HTMLElement ? opener : null));
+  }
+  popupOpen.value = true;
+};
 export const closePopup = () => (popupOpen.value = false);
-export const togglePopup = () => (popupOpen.value = !popupOpen.value);
+export const restorePopupFocus = () => {
+  if (popupOpen.peek()) return;
+  const target = returnFocus?.();
+  returnFocus = undefined;
+  if (target?.isConnected) target.focus();
+};
+export const togglePopup = () => (popupOpen.value ? closePopup() : openPopup());
 
 // Manual overrides
 // @ts-expect-error

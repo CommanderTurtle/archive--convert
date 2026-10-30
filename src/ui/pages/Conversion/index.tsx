@@ -17,8 +17,8 @@ import FormatExplorer from "src/ui/components/Conversion/FormatExplorer";
 import LoadingScreen from "src/ui/components/LoadingScreen";
 import Footer from "src/ui/components/Footer";
 import { ArrowLeft, ArrowRight, Plus } from "lucide-preact";
-import { PopupData } from "src/ui";
-import { openPopup } from "src/ui/PopupStore";
+import { PopupData } from "src/ui/AppState";
+import { openPopup, popupOpen } from "src/ui/PopupStore";
 import FileInfoBadge from "src/ui/components/FileInfo";
 import { ConversionInProgress, CurrentPage, Pages } from "src/ui/AppState";
 import { ProgressStore } from "src/ui/ProgressStore";
@@ -157,6 +157,11 @@ function addFiles(fileList: FileList | null | undefined) {
 }
 
 export default function Conversion() {
+  const actionRef = useRef<HTMLButtonElement>(null);
+  const filesRef = useRef<HTMLDivElement>(null);
+  const actionBarRef = useRef<HTMLDivElement>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  const previousStep = useRef<ConversionStep | null>(null);
   const allOptions = getConversionOptions();
   const files = useMemo(() => Object.values(SelectedFiles.value), [SelectedFiles.value]);
   const firstFile = files[0];
@@ -219,6 +224,13 @@ export default function Conversion() {
     setToOption(null);
     setShowAll(false);
   }, [firstFile]);
+
+  useEffect(() => {
+    if (previousStep.current === "converting" && step !== "converting" && !popupOpen.peek()) {
+      actionRef.current?.focus();
+    }
+    previousStep.current = step;
+  }, [step]);
 
   const handleFromSelect = useCallback((option: ConversionOption | null) => {
     setFromOption(option);
@@ -298,7 +310,7 @@ export default function Conversion() {
           dismissible: true,
           buttonText: "OK",
         };
-        openPopup();
+        openPopup(() => actionRef.current);
         return;
       }
 
@@ -312,7 +324,7 @@ export default function Conversion() {
         dismissible: true,
         buttonText: "OK",
       };
-      openPopup();
+      openPopup(() => actionRef.current);
     } catch (e) {
       console.error(e);
       if (e instanceof Error && e.name === "AbortError") {
@@ -324,7 +336,7 @@ export default function Conversion() {
           dismissible: true,
           buttonText: "OK",
         };
-        openPopup();
+        openPopup(() => actionRef.current);
       }
     } finally {
       setIsConverting(false);
@@ -361,8 +373,19 @@ export default function Conversion() {
           />
         ) : (
           <FormatExplorer
+            searchScopeRef={actionBarRef}
             conversionOptions={allOptions}
             matchingFrom={matchingFromSet}
+            onBack={handleBack}
+            onAdvance={(option) => {
+              if (step === "select-from") {
+                setFromOption(option);
+                setStep("select-to");
+              } else {
+                setToOption(option);
+                requestAnimationFrame(() => actionRef.current?.focus());
+              }
+            }}
             onSelect={step === "select-from" ? handleFromSelect : handleToSelect}
             direction={step === "select-from" ? "from" : "to"}
             fromOption={fromOption}
@@ -382,8 +405,8 @@ export default function Conversion() {
       </main>
 
       {step !== "converting" && (
-        <div className="conversion-action-bar">
-          <div className="conversion-action-files">
+        <div className="conversion-action-bar" ref={actionBarRef}>
+          <div className="conversion-action-files" ref={filesRef}>
             {Object.entries(SelectedFiles.value).map(([key, file]) => (
               <FileInfoBadge
                 key={key}
@@ -391,26 +414,33 @@ export default function Conversion() {
                 fileSize={file.size}
                 extension={file.name.split(".").pop()}
                 mimeType={file.type}
-                onRemove={() => removeFile(key)}
+                onRemove={() => {
+                  // Badges render in SelectedFiles order, so the key's index matches the DOM.
+                  const buttons = [
+                    ...(filesRef.current?.querySelectorAll<HTMLButtonElement>(
+                      ".file-info-remove",
+                    ) ?? []),
+                  ];
+                  const index = Object.keys(SelectedFiles.value).indexOf(key);
+                  const next = buttons[index + 1] ?? buttons[index - 1];
+                  removeFile(key);
+                  requestAnimationFrame(() => {
+                    if (next?.isConnected) next.focus();
+                    else addButtonRef.current?.focus();
+                  });
+                }}
               />
             ))}
-            <div
+            <button
+              ref={addButtonRef}
+              type="button"
               className="file-info-badge file-info-add"
               onClick={handleAddClick}
-              role="button"
-              tabIndex={0}
               aria-label="Add more files"
             >
-              <input
-                ref={addFileRef}
-                type="file"
-                multiple
-                hidden
-                onClick={(ev) => ev.stopPropagation()}
-                onChange={handleAddChange}
-              />
               <Plus size={16} />
-            </div>
+            </button>
+            <input ref={addFileRef} type="file" multiple hidden onChange={handleAddChange} />
           </div>
           {step === "select-to" && (
             <StyledButton onClick={handleBack}>
@@ -419,6 +449,8 @@ export default function Conversion() {
             </StyledButton>
           )}
           <StyledButton
+            buttonRef={actionRef}
+            className="conversion-primary-action"
             variant={ButtonVariant.Primary}
             disabled={!canProceed}
             onClick={step === "select-from" ? handleNext : handleConvert}

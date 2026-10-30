@@ -1,3 +1,5 @@
+import { useRef } from "preact/hooks";
+import useFirstTabTarget from "src/ui/scripts/useFirstTabTarget";
 import { ArrowRight, XSquare } from "lucide-preact";
 import type { FileFormat } from "src/FormatHandler";
 import FileIcon from "src/ui/components/FileIcon";
@@ -15,6 +17,8 @@ interface LoadingScreenProps {
 }
 
 export default function LoadingScreen({ fileName, fileSize, from, to }: LoadingScreenProps) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useFirstTabTarget(cancelRef);
   const fromExt = from?.extension?.toUpperCase();
   const toExt = to?.extension?.toUpperCase();
 
@@ -66,6 +70,7 @@ export default function LoadingScreen({ fileName, fileSize, from, to }: LoadingS
 
         <div className="loading-actions">
           <button
+            ref={cancelRef}
             className="loading-action-btn danger"
             onClick={() => ProgressStore.abort()}
             title="Cancel Conversion"
